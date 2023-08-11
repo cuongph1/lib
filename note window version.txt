@@ -1,0 +1,159 @@
+MongoDB 6.0.8 008R2Plus
+mysql 8.0.34
+Rabbitrmq-server 3.12.2 (yeu cau cai erlang truoc)
+
+cai tren may
+Java 1.8.0_362
+Gradle 3.5
+Cocos creator 2.4.11
+1. mongoDB
+ crate user  bang command (MongoDB compass tool)
+use admin
+db.createUser({ user: "cuong0104" , pwd: "cuong0104", roles: ["userAdminAnyDatabase", "dbAdminAnyDatabase", "readWriteAnyDatabase"]})
+2. install mysql
+ tao user khi cai mysql
+ user root/root
+
+ neu tao bang common thi mo mysql client roi run command: mo Mysql commandline client, nhap password root
+   CREATE USER 'demo'@'localhost' IDENTIFIED BY 'cardgame@123!';
+   GRANT ALL PRIVILEGES ON * . * TO 'demo'@'localhost';
+
+ loi Client does not support authentication protocol requested by server; consider upgrading MySQL client
+   gan lai phuong thuc xac thu user    
+    kiem tra phuong thuc xac thuc hien tai select USER,plugin from mysql.user;
+	ALTER USER 'demo'@'localhost' IDENTIFIED WITH mysql_native_password BY 'cardgame@123!';
+    hoac
+	ALTER USER demo IDENTIFIED WITH mysql_native_password BY 'cardgame@123!';
+ loi Unknown character set index for field '255' received from server.
+    da fix ko can thuc hien gi(da update lib mysql-connector-java-8.0.22.jar)
+ run data_xoatuline3735
+ Da Sua cac procedure root`@`% thanh root`@localhost`
+ 
+
+3. rabbit 
+  yeu cau cai Erlang truoc
+    otp_win64_25.2.3.exe
+  sau do cai 
+    rabbitmq-server-3.11.10.exe
+      enable setting (neu thuc thi command duoi co loi, xem da setting bien moi truong hay chua RABBITMQ_SERVER=C:\Program Files\RabbitMQ Server\rabbitmq_server- 
+   3.7.12\sbin)
+            rabbitmq-plugins enable rabbitmq_management
+            rabbitmq-plugins enable rabbitmq_tracing
+            rabbitmqctl status
+             	create user:  rabbitmqctl add_user demo cardgame@123!
+		gan quyen admin: rabbitmqctl set_user_tags demo administrator
+                gan quyen truy cap vao may ao / : rabbitmqctl set_permissions -p / demo ".*" ".*" ".*"
+		GUI login: http://localhost:15672/
+            rabbitmqctl list_users
+			
+stop command: rabbitmq-plugins disable rabbitmq_management
+
+
+4 Lien quan den cac config
+   Configs.ts thay host
+
+
+5 build app in Mac
+  - install python
+  - setting android sdk, idk
+
+
+-------------------------------------------------------------------
+
+Phan tich source code
+Xoc lo
+ - start websocket
+    XocDiaMain.java
+	   BitZeroServer#start()
+	     BitZeroEngine#start("BitZeroServer alpha")
+		   BitZeroEngine.bootSequence();
+		     IService(WebSocketService).init(Object o)
+			   new WebSocketBoot((WebSocketConfig)o, this.protocolCodec);
+			     WebSocketBoot.java
+				     this.boot();
+							private void boot() throws Exception {
+								ServerBootstrap boot;  ->>>>>>>>>Netty lib
+								int webSocketPort = this.config.getPort();
+								if (!this.config.isUsingFixThreadPool()) {
+									this.logger.info("Websocket Using Cached Thread Pool");
+									boot = new ServerBootstrap((ChannelFactory)new NioServerSocketChannelFactory((Executor)Executors.newCachedThreadPool(), (Executor)Executors.newCachedThreadPool()));
+								} else {
+									this.logger.info("Websocket Using Fixed Thread Pool");
+									boot = new ServerBootstrap((ChannelFactory)new NioServerSocketChannelFactory((Executor)Executors.newFixedThreadPool(this.config.getBossThreadNum()), (Executor)Executors.newFixedThreadPool(this.config.getWorkerThreadNum())));
+								}
+								boot.setPipelineFactory((ChannelPipelineFactory)new WebSocketServerPipelineFactory(this.protocolCodec, false, this.config.isAutoBahnTest()));
+								// tao websocket lang nghe o dia chi va port 
+								boot.bind((SocketAddress)new InetSocketAddress(this.config.getHost(), webSocketPort));
+							}
+	                            Khi client ket noi class WebSocketServerPipelineFactory.getPipeline() se dc goi de xy ly tao new chanel
+								va goi den WebSocketServerHandler da setting de handler request
+	   
+  WebSocketServerHandler.java // overite cac method xu ly request 
+    public void messageReceived(ChannelHandlerContext ctx, MessageEvent e) throws Exception {
+        Object msg = e.getMessage();
+        if (msg instanceof HttpRequest) { // lan dau client open connect to server, tao handshake
+            this.handleHttpRequest(ctx, (HttpRequest)msg);
+        } else if (msg instanceof WebSocketFrame) { // client send data to server
+            this.handleWebSocketFrame(ctx, (WebSocketFrame)msg);  
+        }
+    }
+	
+	method handleWebSocketFrame nhan request send(message) tu client phan tich message va call toi controller class tuong ung ExtensionController.class (ung voi command controlerID = 1)
+    sau do wite data to client
+	Flow tu controller goi toi method xy ly tuong ung
+	ExtensionController.java
+	   processRequest(IRequest request)
+	      processRegularRequest(request)
+		      BZExtension.handleClientRequest(cmd, sender, params);
+				 IClientRequestHandler handler = (IClientRequestHandler)this.handlerFactory.findHandler(requestId);
+			     handler.handleClientRequest(sender, dataCmd);
+				 
+	handleClientRequest
+	
+	
+	
+ - lien quan den setting
+    XocDiaMain.java
+	   BitZeroServer#start()
+	     BitZeroEngine#start("BitZeroServer alpha")
+			 BitZeroEngine.bootSequence()
+			     this.bindSockets(this.configuration.getBindableSockets());
+				 
+	    setting load truoc
+			 BitZeroServer.configureBitZero()
+				 EngineConfiguration engineConfiguration = new EngineConfiguration();
+				 engineConfiguration.addController(new ControllerConfig(coreSettings.extensionControllerClass, DefaultConstants.CORE_EXTENSIONS_CONTROLLER_ID, bzSettings.extensionControllerThreadPoolSize, bzSettings.extensionControllerRequestQueueSize));
+    
+			 core.xml
+			 <systemControllerClass>bitzero.server.controllers.SystemController</systemControllerClass>
+				SystemController.processRequest(IRequest request)
+				
+XocDia.XocDiaController.ts
+  start()
+		add truoc xy ly callback sau khi connect thanh cong va server tra ve ket qua
+        XocDiaNetworkClient.getInstance().addOnOpen(() => {
+            App.instance.showErrLoading("Đang đang đăng nhập...");
+            // update logon time of use to sesion in server
+            // controllerID =1, tuong ung confirg tren server la 
+            // BitZeroServer.java engineConfiguration.addController(new ControllerConfig(coreSettings.extensionControllerClass, DefaultConstants.CORE_EXTENSIONS_CONTROLLER_ID, bzSettings.extensionControllerThreadPoolSize, bzSettings.extensionControllerRequestQueueSize));
+            // server luc tao socket se setting method handler  WebSocketServerHandler
+            // xu ly connect :handleHttpRequest(ctx, (HttpRequest)msg)
+            // xu ly message :handleWebSocketFrame(ctx, (WebSocketFrame)msg) -> phan tich message get controllerID and run method xy ly data, tuong ung voi command nay laf class ExtensionController.java
+            XocDiaNetworkClient.getInstance().send(new cmdNetwork.SendLogin(Configs.Login.Nickname, Configs.Login.AccessToken)); ★
+        }, this);
+        XocDiaNetworkClient.getInstance().addListener((data) => { ★★
+            let inpacket = new InPacket(data);
+            switch (inpacket.getCmdId()) {
+                case cmdNetwork.Code.LOGIN:
+                    App.instance.showLoading(false);
+                    this.lobby.actRefesh();
+                    break;
+            }
+        }, this);
+        // start connect websocket
+        XocDiaNetworkClient.getInstance().connect();
+		sau khi ★ send data, nhan dc data tra ve ★★ se run
+
+
+XocDia.XocDiaNetworkClient.ts
+         overite cac method open, onMessage va call cac danh sach callback da seting
